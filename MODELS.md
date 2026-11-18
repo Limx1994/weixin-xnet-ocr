@@ -136,6 +136,174 @@ XNet 是腾讯私有推理格式，文件头 4 字节 magic 为 ASCII `XNET`，
 
 越界取值会触发 XNet 内部 `__fastfail`（SEH 无法拦截）。
 
+---
+
+## XNet.dll 使用手册
+
+### 它是什么
+
+`XNet.dll` 是腾讯私有的推理运行时，随微信 Windows 版分发。模型文件为 `.xnet`
+格式（文件头 4 字节 ASCII `XNET`），**不是** ONNX / PyTorch / Paddle /
+TensorRT，通用运行时无法加载。
+
+导出表包含 24 个未修饰 C 推理函数（另有 3784 个 MSVC 修饰的 C++ 符号，
+本项目的 OCR 链路只用到前者）。全部为 `__cdecl`，返回不透明句柄。
+
+声明见 `tools\xnet_capi.h`，导入库 `tools\XNet.lib` 由 `tools\XNet.def` 生成：
+
+```powershell
+lib /def:E:\ocr\tools\XNet.def /machine:x64 /out:E:\ocr\tools\XNet.lib
+```
+
+### 加载 DLL：导入表约束
+
+`xnet_infer.exe` / `xnet_ocr_demo.exe` 通过导入表按**裸名** `XNet.dll` 链接，
+Windows 在**代码执行前**就解析该依赖。因此 DLL 必须在：
+
+- 与 exe 同目录，**或**
+- 在 `PATH` 中
+
+代码里再写 `LoadLibrary` 也无法绕过这一点（实测：DLL 不在 PATH 时进程直接以
+`0xC0000135` 启动失败，一句代码都执行不到）。
+
+定位顺序（`ocr\paths.py`、`xnet_infer.cpp`、`xnet_ocr_demo.cpp` 三处一致）：
+
+1. 环境变量 `XNET_WEIXIN_DIR`
+2. exe 同目录副本
+3. `C:\Program Files (x86)\Tencent\Weixin\<版本号最新的子目录>`
+4. `C:\Program Files\Tencent\Weixin\<同上>`
+5. `%LOCALAPPDATA%\Tencent\Weixin\<同上>`
+6. 上述根目录本身
+
+### 调用生命周期
+
+```
+CreateFromFile → GetNumInputs/Outputs → SessionCreate
+  → InitializeInputs → TensorCreate → Lock/写入 → UnLock
+  → SetInput → Run(0) → GetOutput → Lock/读取 → UnLock
+  → TensorDestroy → SessionDestroy → ModelDestroy
+```
+
+### 函数逐条说明（标「实测」的均已验证）
+
+#### 模型
+
+| 函数 | 说明 |
+|---|---|
+| `XNetDnnModelCpuCreateFromFile(path, options)` | **实测** `options` 必须传 `nullptr`，传其他值行为未验证 |
+| `XNetDnnModelCpuCreateFromStream(stream, size, options)` | 从内存加载；本项目未使用 |
+| `XNetDnnModelCpuDestroy(model)` | 释放模型 |
+| `XNetDnnModelCpuGetNumInputs / GetNumOutputs` | 输入/输出个数 |
+| `XNetDnnModelCpuGetInputName / GetOutputName` | **实测** 名字需传给 `SetInput` / `GetOutput`；检测模型输入名为 `input`，输出为 `score_map`、`kernel_map`、`ori_map` |
+
+#### 会话
+
+| 函数 | 说明 |
+|---|---|
+| `XNetDnnSessionCpuCreate(model)` | 创建会话，一个模型可创建多个 |
+| `XNetDnnSessionCpuInitializeInputs(session)` | 必须调用，返回 0 为成功 |
+| `XNetDnnSessionCpuSetInput(session, name, tensor)` | `name` 取自 `GetInputName`，返回 0 为成功 |
+| `XNetDnnSessionCpuRun(session, blocking)` | **实测 blocking 必须为 0**；传 1 在引擎内部崩溃。返回 0 为成功 |
+| `XNetDnnSessionCpuGetOutput(session, name)` | 返回 tensor 指针本身；**未就绪时返回 NULL**，需判空 |
+| `XNetDnnSessionCpuDestroy(session)` | 释放会话 |
+
+#### 张量
+
+| 函数 | 说明 |
+|---|---|
+| `XNetDnnTensorCpuCreate(rank, shape, kind)` | `shape` 为 `rank` 个 int64；`kind` 见上方枚举，越界会 `__fastfail` |
+| `XNetDnnTensorCpuCreateFromBuffer(...)` | 从既有缓冲区创建；本项目未使用 |
+| `XNetDnnTensorCpuLock / UnLock` | 取数据指针，读完必须 UnLock |
+| `XNetDnnTensorCpuGetSizeInBytes` | 字节数 |
+| `XNetDnnTensorCpuGetDim / GetShape / GetDataKind` | 取元信息；本项目未使用（原因见下） |
+| `XNetDnnTensorCpuDestroy` | 释放张量 |
+
+#### 工作区
+
+| 函数 | 说明 |
+|---|---|
+| `XNetDnnWorkspaceCpuCreate(sizeInBytes)` / `...Destroy` | 本项目未使用 |
+
+### 关键陷阱：输出张量的布局字段为零
+
+**实测**：`GetOutput` 返回的 tensor 对象中，常规布局字段（dims 数组等）是
+**零值**，直接用 `GetDim` / `GetShape` 会读到 0 或越界。
+
+可用的对象内偏移（x64，本项目已验证）：
+
+| 偏移 | 内容 |
+|---|---|
+| `+0x08` | `uint64_t rank` |
+| `+0x10` | `int64_t dims[rank]`（连续） |
+| `+0x50` | `int` data kind |
+
+`tools\xnet_infer.cpp` 的 `readInfo()` 即按此读取。数据指针仍走
+`Lock()` 获取。
+
+### 最小可用示例（C）
+
+```c
+#include "xnet_capi.h"
+
+int main(void) {
+    // 1. 模型
+    XNetModel model = XNetDnnModelCpuCreateFromFile("model.xnet", NULL);
+    if (!model) return 5;
+
+    // 2. 会话与输入
+    XNetSession session = XNetDnnSessionCpuCreate(model);
+    if (!session) return 6;
+    if (XNetDnnSessionCpuInitializeInputs(session) != 0) return 7;
+
+    int64_t shape[4] = {1, 3, 32, 200};
+    XNetTensor input = XNetDnnTensorCpuCreate(4, shape, XNET_KIND_FP32);
+    void *ptr = XNetDnnTensorCpuLock(input);
+    // ... 写入 1*3*32*200 个 float32 ...
+    XNetDnnTensorCpuUnLock(input);
+
+    const char *inName = XNetDnnModelCpuGetInputName(model, 0);
+    if (XNetDnnSessionCpuSetInput(session, inName, input) != 0) return 9;
+
+    // 3. 运行：blocking 必须为 0
+    if (XNetDnnSessionCpuRun(session, 0) != 0) return 10;
+
+    // 4. 取输出
+    XNetTensor out = XNetDnnSessionCpuGetOutput(session, "output");
+    if (!out) return 11;
+    uint64_t rank = *(uint64_t *)((unsigned char *)out + 0x08);
+    int64_t *dims = (int64_t *)((unsigned char *)out + 0x10);
+    int kind = *(int *)((unsigned char *)out + 0x50);
+    void *data = XNetDnnTensorCpuLock(out);
+    // ... 按 rank/dims/kind 解释 data ...
+    XNetDnnTensorCpuUnLock(out);
+
+    XNetDnnTensorCpuDestroy(input);
+    XNetDnnSessionCpuDestroy(session);
+    XNetDnnModelCpuDestroy(model);
+    return 0;
+}
+```
+
+崩溃场景（如非法 shape）建议用 SEH 包裹 `Run`，参考 `xnet_infer.cpp` 的
+`SafeRun()`：`__try` 不能与 C++ 异常展开共存，须放在 `__declspec(noinline)`
+的独立函数里。
+
+### 本项目中的两种封装
+
+| 方式 | 位置 | 适用 |
+|---|---|---|
+| C++ 子进程 | `tools\xnet_infer.cpp` → `xnet_infer.exe` | 主流水线；读 raw NCHW bin，出 bin + json |
+| C++ 演示 | `tools\xnet_ocr_demo.cpp` → `xnet_ocr_demo.exe` | 单模型调用演示，验证导入库可用 |
+
+Python 侧不直接调用 DLL，而是以子进程方式驱动 `xnet_infer.exe`
+（见 `ocr\ocr_image.py` 的 `run_infer()`）。这样做的好处是引擎崩溃只终止
+子进程，不会带走 Python 进程。
+
+raw 输入格式：头部 `uint64 rank` + `rank × int64 dims` + `float32` 数据
+（小端），见 `ocr\make_input.py` 的 `write_input_nchw()`。
+
+---
+
 ## 许可与合规
 
 - 模型文件、`XNet.dll`、`wxocr.dll` 均为**腾讯版权组件**，随微信安装分发。

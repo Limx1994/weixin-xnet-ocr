@@ -162,15 +162,15 @@ PASS（3.5 秒）；无文字图片无误检；同一输出目录重复运行 2 
 
 ### XNet C API
 
-`XNet.dll` 导出 24 个未修饰 C 函数（另有 3784 个 MSVC 修饰的 C++ 符号）：
+`XNet.dll` 导出 24 个未修饰 C 函数（另有 3784 个 MSVC 修饰的 C++ 符号）。
+完整用法——生命周期、逐函数说明、DLL 加载约束、输出张量布局陷阱、可直接
+编译的 C 示例——见 [MODELS.md](MODELS.md) 的「XNet.dll 使用手册」。
 
-```
-XNetDnnModelCpuCreateFromFile(path, options)    // options 必须传 nullptr
-XNetDnnModelCpuGetNumInputs / GetNumOutputs / GetInputName / GetOutputName
-XNetDnnSessionCpuCreate(model) / InitializeInputs / SetInput / Run / GetOutput / Destroy
-XNetDnnTensorCpuCreate(rank, shape, kind) / Lock / UnLock / GetSizeInBytes / Destroy
-XNetDnnWorkspaceCpuCreate / Destroy
-```
+其中最易踩的三点：
+
+- `CreateFromFile` 的 `options` 必须传 `nullptr`
+- `Run` 必须传非阻塞 `0`（传 1 在引擎内部崩溃）
+- DLL 是**导入表**依赖，必须在 exe 同目录或 `PATH` 中，否则 `0xC0000135`
 
 ### 模型契约
 
