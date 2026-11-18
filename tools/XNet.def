@@ -1,0 +1,31 @@
+; XNet.dll import library definition.
+; Generated from the export table of
+;   C:\Program Files (x86)\Tencent\Weixin\4.1.13.48\XNet.dll
+; Contains only the undecorated C inference API (24 entries).
+; Build:  lib /def:XNet.def /machine:x64 /out:XNet.lib
+LIBRARY XNet.dll
+EXPORTS
+    XNetDnnModelCpuCreateFromFile
+    XNetDnnModelCpuCreateFromStream
+    XNetDnnModelCpuDestroy
+    XNetDnnModelCpuGetInputName
+    XNetDnnModelCpuGetNumInputs
+    XNetDnnModelCpuGetNumOutputs
+    XNetDnnModelCpuGetOutputName
+    XNetDnnSessionCpuCreate
+    XNetDnnSessionCpuDestroy
+    XNetDnnSessionCpuGetOutput
+    XNetDnnSessionCpuInitializeInputs
+    XNetDnnSessionCpuRun
+    XNetDnnSessionCpuSetInput
+    XNetDnnTensorCpuCreate
+    XNetDnnTensorCpuCreateFromBuffer
+    XNetDnnTensorCpuDestroy
+    XNetDnnTensorCpuGetDataKind
+    XNetDnnTensorCpuGetDim
+    XNetDnnTensorCpuGetShape
+    XNetDnnTensorCpuGetSizeInBytes
+    XNetDnnTensorCpuLock
+    XNetDnnTensorCpuUnLock
+    XNetDnnWorkspaceCpuCreate
+    XNetDnnWorkspaceCpuDestroy

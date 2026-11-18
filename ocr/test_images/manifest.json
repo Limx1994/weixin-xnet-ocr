@@ -1,0 +1,72 @@
+{
+  "plain": {
+    "path": "E:\\ocr\\ocr\\test_images\\plain.png",
+    "expected": [
+      "微信扫码支付成功",
+      "订单金额 128.50 元",
+      "Order No.20240118"
+    ]
+  },
+  "mixed_fonts": {
+    "path": "E:\\ocr\\ocr\\test_images\\mixed_fonts.png",
+    "expected": [
+      "黑体标题:文本检测结果",
+      "微软雅黑正文识别率接近百分之百",
+      "楷体注释 Kaiti Note 0123"
+    ]
+  },
+  "small_text": {
+    "path": "E:\\ocr\\ocr\\test_images\\small_text.png",
+    "expected": [
+      "小字号第一行 12px",
+      "第二行 ABCDEFG",
+      "第三行 混合 mixed 文字"
+    ]
+  },
+  "dense_lines": {
+    "path": "E:\\ocr\\ocr\\test_images\\dense_lines.png",
+    "expected": [
+      "第一行:微信OCR端到端测试",
+      "第二行:检测与识别串联",
+      "第三行:CTC解码输出文本",
+      "第四行:XNet推理引擎"
+    ]
+  },
+  "noisy_bg": {
+    "path": "E:\\ocr\\ocr\\test_images\\noisy_bg.png",
+    "expected": [
+      "噪声背景上的文字识别",
+      "Noise Background Test 2024"
+    ]
+  },
+  "low_contrast": {
+    "path": "E:\\ocr\\ocr\\test_images\\low_contrast.png",
+    "expected": [
+      "低对比度文字 Low Contrast",
+      "灰度接近背景 Gray Text"
+    ]
+  },
+  "blur": {
+    "path": "E:\\ocr\\ocr\\test_images\\blur.png",
+    "expected": [
+      "轻微模糊的文字样本",
+      "Blurred Text Sample 01"
+    ]
+  },
+  "no_text": {
+    "path": "E:\\ocr\\ocr\\test_images\\no_text.png",
+    "expected": []
+  },
+  "single_char": {
+    "path": "E:\\ocr\\ocr\\test_images\\single_char.png",
+    "expected": [
+      "微"
+    ]
+  },
+  "long_line": {
+    "path": "E:\\ocr\\ocr\\test_images\\long_line.png",
+    "expected": [
+      "这是一行比较长的中文文本用于验证检测模型在长文本场景下不会把文字截断成多个片段"
+    ]
+  }
+}

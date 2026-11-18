@@ -1,0 +1,22 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# OCR 运行残留：每次识别/验收都会再生成的中间产物（raw 输入、模型输出 bin、
+# result.json）。它们体积大（单次可达数十 MB），不属于交付内容。
+ocr/_*/
+build/ocr/_c/
+build/ocr/_case/
+build/ocr/_out/
+build/ocr/_final/
+build/_*/
+build/build_tmp/
+build/spec/
+
+# 编辑器/系统杂项
+*.bak
+*.tmp
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
