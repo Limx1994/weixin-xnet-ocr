@@ -1,0 +1,15 @@
+# 固定换行符，避免 Windows 检出时把 LF 转成 CRLF 而改变文档内容。
+* text=auto eol=lf
+
+# 二进制资产：不做任何换行转换，也不参与 diff。
+*.dll   binary
+*.exe   binary
+*.lib   binary
+*.def   text
+*.xnet  binary
+*.bin   binary
+*.png   binary
+*.jpg   binary
+*.bmp   binary
+*.tif   binary
+*.zip   binary
