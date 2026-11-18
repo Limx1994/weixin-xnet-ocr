@@ -11,6 +11,8 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
+#include <algorithm>
+#include <functional>
 #include <windows.h>
 
 #include "xnet_capi.h"
@@ -65,6 +67,86 @@ static int writeJson(const std::string &path, const char *name, const Info &i,
     return 0;
 }
 
+// Defined below; declared here so loadXNetDll can call it.
+static HMODULE tryVersionDir(const wchar_t *root);
+
+// Search XNet.dll the same way ocr\paths.py and xnet_ocr_demo.cpp do: an
+// explicit override first, then the copy next to the exe, then the newest
+// Weixin version subdirectory. A fixed install path would break on any other
+// machine or WeChat version.
+static HMODULE loadXNetDll(const wchar_t *exeDir) {
+    const wchar_t *override = _wgetenv(L"XNET_WEIXIN_DIR");
+    if (override && *override) {
+        wchar_t p[1024];
+        _snwprintf_s(p, _countof(p), _TRUNCATE, L"%s\\XNet.dll", override);
+        HMODULE lib = LoadLibraryExW(p, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+        if (lib) { std::printf("      source: XNET_WEIXIN_DIR\n"); return lib; }
+    }
+    if (exeDir && *exeDir) {
+        wchar_t p[1024];
+        _snwprintf_s(p, _countof(p), _TRUNCATE, L"%s\\XNet.dll", exeDir);
+        HMODULE lib = LoadLibraryExW(p, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+        if (lib) { std::printf("      source: next to exe\n"); return lib; }
+    }
+
+    static const wchar_t *roots[] = {
+        L"C:\\Program Files (x86)\\Tencent\\Weixin",
+        L"C:\\Program Files\\Tencent\\Weixin",
+    };
+    static wchar_t localBuf[MAX_PATH];
+    const wchar_t *localRoot = nullptr;
+    if (GetEnvironmentVariableW(L"LOCALAPPDATA", localBuf, MAX_PATH))
+        localRoot = localBuf;
+
+    for (int r = 0; r < 2; ++r) {
+        HMODULE lib = tryVersionDir(roots[r]);
+        if (lib) return lib;
+    }
+    if (localRoot) {
+        wchar_t p[1024];
+        _snwprintf_s(p, _countof(p), _TRUNCATE, L"%s\\Tencent\\Weixin", localRoot);
+        HMODULE lib = tryVersionDir(p);
+        if (lib) return lib;
+    }
+    std::printf("      source: none found\n");
+    return nullptr;
+}
+
+// Try "<root>\<version>\XNet.dll" for every version-looking subdirectory,
+// newest first, then "<root>\XNet.dll" itself.
+static HMODULE tryVersionDir(const wchar_t *root) {
+    wchar_t pattern[1024];
+    _snwprintf_s(pattern, _countof(pattern), _TRUNCATE, L"%s\\*", root);
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW(pattern, &fd);
+    if (h == INVALID_HANDLE_VALUE) return nullptr;
+
+    std::vector<std::wstring> versions;
+    do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        int dots = 0;
+        for (const wchar_t *p = fd.cFileName; *p; ++p)
+            if (*p == L'.') ++dots;
+        if (dots >= 2) versions.push_back(fd.cFileName);
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+
+    std::sort(versions.begin(), versions.end(), std::greater<std::wstring>());
+    for (const std::wstring &v : versions) {
+        wchar_t p[1024];
+        _snwprintf_s(p, _countof(p), _TRUNCATE, L"%s\\%s\\XNet.dll", root, v.c_str());
+        HMODULE lib = LoadLibraryExW(p, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+        if (lib) { std::printf("      source: %s\\%s\n", toNarrow(root).c_str(),
+                               toNarrow(v.c_str()).c_str()); return lib; }
+    }
+
+    wchar_t direct[1024];
+    _snwprintf_s(direct, _countof(direct), _TRUNCATE, L"%s\\XNet.dll", root);
+    HMODULE lib = LoadLibraryExW(direct, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+    if (lib) std::printf("      source: %s\n", toNarrow(root).c_str());
+    return lib;
+}
+
 int wmain(int argc, wchar_t **wargv) {
     if (argc < 4) {
         std::printf("usage: xnet_infer <model.xnet> <input.bin> <out_dir> [kind]\n");
@@ -75,10 +157,17 @@ int wmain(int argc, wchar_t **wargv) {
     std::string outDir = toNarrow(wargv[3]);
     int kind = (argc >= 5) ? _wtoi(wargv[4]) : XNET_KIND_FP32;
 
-    HMODULE lib = LoadLibraryExW(
-        L"C:\\Program Files (x86)\\Tencent\\Weixin\\4.1.13.48\\XNet.dll",
-        nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
-    if (!lib) { std::printf("XNet.dll load failed: %lu\n", GetLastError()); return 3; }
+    wchar_t exeDir[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, exeDir, MAX_PATH);
+    if (wcsrchr(exeDir, L'\\')) *wcsrchr(exeDir, L'\\') = L'\0';
+
+    HMODULE lib = loadXNetDll(exeDir);
+    if (!lib) {
+        std::printf("XNet.dll load failed: %lu\n", GetLastError());
+        std::printf("set XNET_WEIXIN_DIR to the directory holding XNet.dll\n");
+        return 3;
+    }
+    std::printf("XNet.dll loaded\n");
 
     // Read input header: first 4 bytes = rank, then rank * 8 bytes of int64 dims.
     FILE *in = nullptr;

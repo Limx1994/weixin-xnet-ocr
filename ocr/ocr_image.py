@@ -191,11 +191,13 @@ def recognize(gray_line, work, idx, mean=0.5, std=0.5, target_h=32,
               max_steps=90):
     """Recognise one text strip.
 
-    The recogniser only accepts an input height of 32 (48 and above fail
-    inside the engine), and it advances one CTC step per 4 input pixels, so a
-    strip wider than the step budget is split at inter-glyph gaps and the
-    per-segment results are concatenated. Narrow strips are padded with white
-    margins because a bare glyph only a few pixels wide decodes unreliably.
+    Measured envelope of the recogniser: the input height may be 18-32 (32 is
+    the shipping value; below 18 or above 32 the engine returns failure code
+    10), and the output step count is W/4 regardless of height. A single pass
+    stays exact up to about 29 glyphs (T<=400), so a strip wider than the step
+    budget is split at inter-glyph gaps and the per-segment results are
+    concatenated. Narrow strips are padded with white margins because a bare
+    glyph only a few pixels wide decodes unreliably.
     """
     h, w = gray_line.shape[:2]
     if h <= 0 or w <= 0:
@@ -258,11 +260,11 @@ def _plan_cuts(gray_line, max_w):
     """Choose cut columns on inter-glyph gaps, dividing the line evenly.
 
     Measured on this engine: one CTC step covers about a quarter of a Chinese
-    glyph, so a segment of width W gives W/4 steps and decodes roughly W/16
-    glyphs. budget is therefore set to keep segments at about 8 glyphs
-    (max_w * 0.18, i.e. ~130 px for the default budget). Cutting only in blank
-    columns keeps every glyph whole, which is what makes plain concatenation of
-    the segment results safe.
+    glyph, and a single pass decodes 29 glyphs exactly at T<=400. The budget is
+    deliberately tighter (max_w * 0.18, i.e. ~130 px for the default 720 px
+    step budget) so a segment stays well inside the accurate region. Cutting
+    only in blank columns keeps every glyph whole, which is what makes plain
+    concatenation of the segment results safe.
     """
     h, w = gray_line.shape[:2]
     budget = max(64, int(max_w * 0.18))
